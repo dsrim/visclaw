@@ -100,8 +100,8 @@ class GaugeSolution(object):
             output = None
         else:
             output = "%4i" % self.number
-            output = " ".join((output,"%19.10e" % self.location[0]))
-            output = " ".join((output,"%17.10e" % self.location[1]))
+            for j in range(len(self.location)):
+                output = " ".join((output,"%17.10e" % self.location[j]))
             output = " ".join((output,"%13.6e" % self.t1))
             output = " ".join((output,"%13.6e\n" % self.t2))
         return output
@@ -433,7 +433,7 @@ def plotgauge1(gaugesoln, plotitem, current_data):
 
     return current_data
     
-def read_setgauges(datadir):
+def read_setgauges(outdir):
     """
     Read the info from gauges.data.
     """
@@ -447,7 +447,7 @@ def read_setgauges(datadir):
 
     setgauges = amrclaw.GaugeData()
     try:
-        setgauges.read(datadir)
+        setgauges.read(outdir)
     except IOError as e:
         # No gauges.data file was found, ignore this exception
         pass
@@ -472,7 +472,7 @@ def plot_gauge_locations(plotdata, gaugenos='all', mapc2p=None, \
     datadir = plotdata.rundir  # this should contain gauges.data
 
     try:
-        setgauges = read_setgauges(datadir)
+        setgauges = read_setgauges(plotdata.outdir)
     except:
         return
 
