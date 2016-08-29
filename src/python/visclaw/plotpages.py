@@ -2880,28 +2880,40 @@ def plotclaw_driver(plotdata, verbose=False, format='ascii'):
     pngfile = {}
     frametimes = {}
 
-    for file in glob.glob('fort.q*'):
-        frameno = int(file[7:10])
-        fortfile[frameno] = file
-        for figno in fignos_each_frame:
-            pngfile[frameno,figno] = 'frame' + file[-4:] + 'fig%s.png' % figno
-
-    #DK: In PetClaw, we don't output fort.q* files.  Instead count the
-    #claw.pkl* files.
-    if len(fortfile) == 0:
-        for file in glob.glob('claw.pkl*'):
-            frameno = int(file[9:12])
+    if plotdata.has_attribute('slice3d') and plotdata.slice3d:
+        #DR: sliced output has different file formats, slice_#.qxxxx
+        slice3d = True
+        for file in glob.glob('slice_*.q*'):
+            frameno = int(file[-4:])    # slice number may have variable digits
             fortfile[frameno] = file
             for figno in fignos_each_frame:
                 pngfile[frameno,figno] = 'frame' + file[-4:] + 'fig%s.png' % figno
+    else:
+        slice3d = False
+        for file in glob.glob('fort.q*'):
+            frameno = int(file[7:10])
+            fortfile[frameno] = file
+            for figno in fignos_each_frame:
+                pngfile[frameno,figno] = 'frame' + file[-4:] + 'fig%s.png' % figno
+
+        #DK: In PetClaw, we don't output fort.q* files.  Instead count the
+        #claw.pkl* files.
+        if len(fortfile) == 0:
+            for file in glob.glob('claw.pkl*'):
+                frameno = int(file[9:12])
+                fortfile[frameno] = file
+                for figno in fignos_each_frame:
+                    pngfile[frameno,figno] = 'frame' + file[-4:] + 'fig%s.png' % figno
 
     if len(fortfile) == 0:
         print '*** No fort.q or claw.pkl files found in directory ', os.getcwd()
         return plotdata
 
+
     # Discard frames that are not from latest run, based on
     # file modification time:
-    framenos = frametools.only_most_recent(framenos, plotdata.outdir)
+    framenos = frametools.only_most_recent(framenos, plotdata.outdir, \
+                                           slice3d = slice3d)
 
     numframes = len(framenos)
 
@@ -2917,12 +2929,14 @@ def plotclaw_driver(plotdata, verbose=False, format='ascii'):
     fignames = plotdata._figname_from_num
 
     # Only grab times by loading in time
-    for frameno in framenos:
-        plotdata.output_controller.output_path = plotdata.outdir
-        frametimes[frameno] = plotdata.output_controller.get_time(frameno)
+    if slice3d:
+        for frameno in framenos:
+            frametimes[frameno] = plotdata.getframe(frameno, plotdata.outdir).t
 
-    # for frameno in framenos:
-    #     frametimes[frameno] = plotdata.getframe(frameno, plotdata.outdir).t
+    else:
+        for frameno in framenos:
+            plotdata.output_controller.output_path = plotdata.outdir
+            frametimes[frameno] = plotdata.output_controller.get_time(frameno)
 
     plotdata.timeframes_framenos = framenos
     plotdata.timeframes_frametimes = frametimes

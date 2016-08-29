@@ -73,6 +73,7 @@ class ClawPlotData(clawdata.ClawData):
 
         self.add_attribute('iplotclaw_fignos','all')    # which figures to plot interactively
 
+        self.add_attribute('slice3d',False)                # make slice plots for 3D
         self.add_attribute('latex',True)                # make latex files for figures
         self.add_attribute('latex_fname','plots')       # name of latex file
         self.add_attribute('latex_title','Clawpack Results')
@@ -199,7 +200,7 @@ class ClawPlotData(clawdata.ClawData):
         return plotfigure
 
 
-    def getframe(self,frameno,outdir=None,refresh=False):
+    def getframe(self,frameno,outdir=None,refresh=False,file_prefix=None):
         """
         ClawPlotData.getframe:
         Return an object of class Solution containing the solution
@@ -228,7 +229,36 @@ class ClawPlotData(clawdata.ClawData):
         key = (frameno, outdir)
 
         if refresh or (not framesoln_dict.has_key(key)):
-            framesoln = solution.Solution(frameno,path=outdir,file_format=self.format)
+            if self.slice3d:
+                # get solution for slices
+                
+                slice_data_path = os.path.join(outdir,'slices.data')
+                
+                # setting attributes in advance before reading
+                self.add_attribute('nslices')
+                self.add_attribute('normal')
+                self.add_attribute('point')
+                 
+                self.read(slice_data_path)
+                
+                all_states = []
+                file_prefix_list = ['_'.join(['slice',str(k+1)]) \
+                                        for k in range(self.nslices)]
+
+                for j,file_prefix in enumerate(file_prefix_list):
+                    framesoln1 = solution.Solution(frameno,path=outdir,\
+                                                  file_format=self.format,\
+                                                  file_prefix=file_prefix)
+                    for state in framesoln1.states:
+                        state.normal = self.normal[j]
+                        state.point = self.point[j]
+
+                    all_states = all_states + framesoln1.states
+
+                framesoln = framesoln1
+
+            else:
+                framesoln = solution.Solution(frameno,path=outdir,file_format=self.format)
             if not self.save_frames:
                 framesoln_dict.clear()
             framesoln_dict[key] = framesoln
@@ -851,7 +881,33 @@ class ClawPlotItem(clawdata.ClawData):
                  print '*** Warning 2d plot type %s not recognized' % plot_type
 
         elif num_dim == 3:
-            raise NotImplementedError('ClawPlotItem not yet set up for num_dim = 3')
+
+            # default values specifying this single plot:
+            self.add_attribute('plot_type',plot_type)
+            self.add_attribute('celledges_show',0)
+            self.add_attribute('celledges_color','k')
+            self.add_attribute('patch_bgcolor','w')
+            self.add_attribute('patchedges_show',0)
+            self.add_attribute('patchedges_color','k')
+            self.add_attribute('add_colorbar',False)
+            self.add_attribute('colorbar_shrink',1.0)
+            self.add_attribute('colorbar_label',None)
+            self.add_attribute('colorbar_ticks', None)
+            self.add_attribute('colorbar_tick_labels',None)
+            self.add_attribute('kwargs',{})
+            amr_attributes = """celledges_show celledges_color data_show
+              patch_bgcolor patchedges_show patchedges_color kwargs""".split()
+            for a in amr_attributes:
+                self.add_attribute('amr_%s' % a, [])
+
+            if plot_type == '3d_slice':
+                from clawpack.visclaw import colormaps
+                self.add_attribute('pcolor_cmap',colormaps.yellow_red_blue)
+                self.add_attribute('pcolor_cmin',None)
+                self.add_attribute('pcolor_cmax',None)
+
+            else:
+                 print '*** Warning 3d plot type %s not recognized' % plot_type
 
         else:
             raise Warning('Unrecognized plot_type in ClawPlotItem')

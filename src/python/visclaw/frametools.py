@@ -55,6 +55,7 @@ def plotframe(frameno, plotdata, verbose=False, simple=False, refresh=False):
     for outdir in plotdata._outdirs:
         framesolns.append(plotdata.getframe(frameno, outdir, refresh=refresh))
 
+    
 
     # It seems that 'current_data', returned from plot_frame,
     # doesn't get used at all.
@@ -203,6 +204,9 @@ def plot_frame(framesolns,plotdata,frameno=0,verbose=False):
                         current_data.add_attribute('y',patch.grid.p_centers[1])
                         current_data.add_attribute('dy',patch.delta[1])
 
+                    #if patch.num_dim == 3 and self.slice3d :
+                        
+
                     if plotfigure.use_for_kml:
 
                         # -------------------------------------------------------------
@@ -269,11 +273,16 @@ def plot_frame(framesolns,plotdata,frameno=0,verbose=False):
                         else:
                             show_this_level = True
 
+                        import pdb
+                        pdb.set_trace()
+
                         if plotitem._show and show_this_level:
                             if num_dim == 1:
                                 plotitem_fun = plotitem1
                             elif num_dim == 2:
                                 plotitem_fun = plotitem2
+                            elif num_dim == 3:
+                                plotitem_fun = plotitem3
                             current_data = plotitem_fun(framesoln,plotitem,current_data,stateno)
 
                             if verbose:
@@ -946,6 +955,356 @@ def plotitem2(framesoln, plotitem, current_data, stateno):
 
     return current_data
 
+
+
+#==================================================================
+def plotitem3(framesoln, plotitem, current_data, stateno):
+#==================================================================
+    """
+    Make a 2d plot for a single plot item for the solution in framesoln.
+
+    The current_data object holds data that should be passed into
+    afterpatch or afteraxes if these functions are defined.  The functions
+    may add to this object, so this function should return the possibly
+    modified current_data for use in other plotitems or in afteraxes or
+    afterframe.
+
+    """
+
+    import numpy as np
+    from numpy import ma
+    from clawpack.visclaw import colormaps
+
+    plotdata = plotitem._plotdata
+
+    state = framesoln.states[stateno]
+    patch = state.patch
+    level = patch.level #2d only
+
+    current_data.patch = patch
+    current_data.q = state.q
+    current_data.aux = state.aux
+    current_data.add_attribute('level',level) #2d only
+
+    t = framesoln.t
+
+    # The following plot parameters should be set and independent of
+    # which AMR level a patch is on:
+
+    base_params = ['plot_type','afteritem','mapc2p','MappedGrid']
+
+    level_params = ['plot_var','afterpatch','kwargs',
+             'celledges_show','celledges_color','patch_bgcolor',
+             'patchedges_show','patchedges_color','add_colorbar',
+             'pcolor_cmap','pcolor_cmin','pcolor_cmax',
+             'imshow_cmap','imshow_cmin','imshow_cmax',
+             'contour_levels','contour_nlevels','contour_min','contour_max',
+             'contour_colors','contour_cmap','contour_show',
+             'fill_cmap','fill_cmin','fill_cmax','fill_colors',
+             'schlieren_cmap','schlieren_cmin', 'schlieren_cmax',
+             'quiver_coarsening','quiver_var_x','quiver_var_y','quiver_key_show',
+             'quiver_key_scale','quiver_key_label_x','quiver_key_label_y',
+             'quiver_key_scale','quiver_key_units','quiver_key_kwargs']
+
+    pp = params_dict(plotitem, base_params, level_params,patch.level)
+
+    if pp['mapc2p'] is None:
+        # if this item does not have a mapping, check for a global mapping:
+        pp['mapc2p'] = getattr(plotdata, 'mapc2p', None)
+
+    # turn patch background color into a colormap for use with pcolor cmd:
+    pp['patch_bgcolormap'] = colormaps.make_colormap({0.: pp['patch_bgcolor'], \
+                                             1.: pp['patch_bgcolor']})
+
+    var  = get_var(state,pp['plot_var'],current_data)
+    current_data.var = var
+
+    # Grid mapping:
+
+    xc_edges, yc_edges = patch.grid.c_nodes
+    xc_centers, yc_centers = patch.grid.c_centers
+    if pp['MappedGrid'] is None:
+        pp['MappedGrid'] = (pp['mapc2p'] is not None)
+
+    if (pp['MappedGrid'] & (pp['mapc2p'] is None)):
+        raise Exception("MappedGrid == True but no mapc2p specified")
+    elif pp['MappedGrid']:
+        X_center, Y_center = pp['mapc2p'](xc_centers, yc_centers)
+        X_edge, Y_edge = pp['mapc2p'](xc_edges, yc_edges)
+    else:
+        X_center, Y_center = xc_centers, yc_centers
+        X_edge, Y_edge = xc_edges, yc_edges
+
+    plt.hold(True)
+
+    if ma.isMaskedArray(var):
+        # If var is a masked array: plotting should work ok unless all
+        # values are masked, in which case pcolor complains and there's
+        # no need to try to plot.  Check for this case...
+        var_all_masked = (ma.count(var) == 0)
+    else:
+        # not a masked array, so certainly not all masked:
+        var_all_masked = False
+
+    # pcolormesh is much faster but cannot be used with masked coordinate arrays
+    if ma.isMaskedArray(X_edge) or ma.isMaskedArray(Y_edge):
+        pc_cmd = 'pcolor'
+        pc_mth = plt.pcolor
+    else:
+        pc_cmd = 'pcolormesh'
+        pc_mth = plt.pcolormesh
+
+    if pp['plot_type'] == '2d_pcolor':
+
+        pcolor_cmd = "pobj = plt."+pc_cmd+"(X_edge, Y_edge, var, \
+                        cmap=pp['pcolor_cmap']"
+
+        if pp['celledges_show']:
+            pcolor_cmd += ", edgecolors=pp['celledges_color']"
+        else:
+            pcolor_cmd += ", shading='flat'"
+
+        pcolor_cmd += ", **pp['kwargs'])"
+
+        if not var_all_masked:
+            exec(pcolor_cmd)
+
+
+            if (pp['pcolor_cmin'] not in ['auto',None]) and \
+                     (pp['pcolor_cmax'] not in ['auto',None]):
+                plt.clim(pp['pcolor_cmin'], pp['pcolor_cmax'])
+        else:
+            #print '*** Not doing pcolor on totally masked array'
+            pass
+
+    elif pp['plot_type'] == '2d_imshow':
+
+        if not var_all_masked:
+            if pp['imshow_cmin'] in ['auto',None]:
+                pp['imshow_cmin'] = np.min(var)
+            if pp['imshow_cmax'] in ['auto',None]:
+                pp['imshow_cmax'] = np.max(var)
+            from matplotlib.colors import Normalize
+            color_norm = Normalize(pp['imshow_cmin'],pp['imshow_cmax'],clip=True)
+
+            xylimits = (X_edge[0,0],X_edge[-1,-1],Y_edge[0,0],Y_edge[-1,-1])
+            pobj = plt.imshow(np.flipud(var.T), extent=xylimits, \
+                    cmap=pp['imshow_cmap'], interpolation='nearest', \
+                    norm=color_norm)
+
+            if pp['celledges_show']:
+                # This draws patch for labels shown.  Levels not shown will
+                # not have lower levels blanked out however.  There doesn't
+                # seem to be an easy way to do this.
+                pobj = plt.plot(X_edge, Y_edge, color=pp['celledges_color'])
+                pobj = plt.plot(X_edge.T, Y_edge.T, color=pp['celledges_color'])
+
+        else:
+            #print '*** Not doing imshow on totally masked array'
+            pass
+
+
+    elif pp['plot_type'] in ['2d_contour','2d_contourf']:
+        levels_set = True
+        if pp['contour_levels'] is None:
+            levels_set = False
+            if pp['contour_nlevels'] is None:
+                print '*** Error in plotitem2:'
+                print '    contour_levels or contour_nlevels must be set'
+                raise
+                return
+            if (pp['contour_min'] is not None) and \
+                    (pp['contour_max'] is not None):
+
+                pp['contour_levels'] = np.linspace(pp['contour_min'], \
+                       pp['contour_max'], pp['contour_nlevels'])
+                levels_set = True
+
+
+        if pp['celledges_show']:
+            pobj = pc_mth(X_edge, Y_edge, np.zeros(var.shape), \
+                    cmap=pp['patch_bgcolormap'], edgecolors=pp['celledges_color'])
+        elif pp['patch_bgcolor'] is not 'w':
+            pobj = pc_mth(X_edge, Y_edge, np.zeros(var.shape), \
+                    cmap=pp['patch_bgcolormap'], edgecolors='None')
+        plt.hold(True)
+
+
+        if pp['plot_type'] == '2d_contour':
+            # create the contour command:
+            contourcmd = "pobj = plt.contour(X_center, Y_center, var, "
+            if levels_set:
+                contourcmd += "pp['contour_levels']"
+            else:
+                contourcmd += "pp['contour_nlevels']"
+
+            if pp['contour_cmap']:
+                if (pp['kwargs'] is None) or ('cmap' not in pp['kwargs']):
+                    contourcmd += ", cmap = pp['contour_cmap']"
+            elif pp['contour_colors']:
+                if (pp['kwargs'] is None) or ('colors' not in pp['kwargs']):
+                    contourcmd += ", colors = pp['contour_colors']"
+
+            contourcmd += ", **pp['kwargs'])"
+
+            if (pp['contour_show'] and not var_all_masked):
+                # may suppress plotting at coarse levels
+                exec(contourcmd)
+
+
+        if pp['plot_type'] == '2d_contourf':
+
+            # create the contourf command:
+            contourcmd = "pobj = plt.contourf(X_center, Y_center, var, "
+            if levels_set:
+                contourcmd += "pp['contour_levels']"
+            else:
+                contourcmd += "pp['contour_nlevels']"
+
+            if pp['fill_cmap']:
+                if (pp['kwargs'] is None) or ('cmap' not in pp['kwargs']):
+                    contourcmd += ", cmap = pp['fill_cmap']"
+            elif pp['fill_colors']:
+                if (pp['kwargs'] is None) or ('colors' not in pp['kwargs']):
+                    contourcmd += ", colors = pp['fill_colors']"
+
+
+            if (pp['kwargs'] is None) or ('extend' not in pp['kwargs']):
+                contourcmd += ", extend = 'both'"
+
+            contourcmd += ", **pp['kwargs'])"
+
+
+            if (not var_all_masked):
+                # may suppress plotting at coarse levels
+                exec(contourcmd)
+
+                if pp['fill_cmap'] and \
+                         (pp['fill_cmin'] not in ['auto',None]) and \
+                         (pp['fill_cmax'] not in ['auto',None]):
+                    plt.clim(pp['fill_cmin'], pp['fill_cmax'])
+
+
+    elif pp['plot_type'] == '2d_patch':
+        # plot only the patches, no data:
+        if pp['celledges_show']:
+            pobj = pc_mth(X_edge, Y_edge, np.zeros(var.shape), \
+                    cmap=pp['patch_bgcolormap'], edgecolors=pp['celledges_color'],\
+                    shading='faceted')
+        else:
+            pobj = pc_mth(X_edge, Y_edge, np.zeros(var.shape), \
+                    cmap=pp['patch_bgcolormap'], shading='flat')
+
+
+    elif pp['plot_type'] == '2d_schlieren':
+        # plot 2-norm of gradient of variable var:
+
+        # No idea why this next line is needed...maybe a 64-/32-bit incompatibility issue?
+        var = np.array(var)
+        (vx,vy) = np.gradient(var)
+        vs = np.sqrt(vx**2 + vy**2)
+
+        pcolor_cmd = "pobj = plt.pcolormesh(X_edge, Y_edge, vs, \
+                        cmap=pp['schlieren_cmap']"
+
+        if pp['celledges_show']:
+            pcolor_cmd += ", edgecolors=pp['celledges_color']"
+        else:
+            pcolor_cmd += ", edgecolors='None'"
+
+        pcolor_cmd += ", **pp['kwargs'])"
+
+        if not var_all_masked:
+            exec(pcolor_cmd)
+
+            if (pp['schlieren_cmin'] not in ['auto',None]) and \
+                     (pp['schlieren_cmax'] not in ['auto',None]):
+                plt.clim(pp['schlieren_cmin'], pp['schlieren_cmax'])
+
+    elif pp['plot_type'] == '2d_quiver':
+        if pp['quiver_coarsening'] > 0:
+            var_x = get_var(state,pp['quiver_var_x'],current_data)
+            var_y = get_var(state,pp['quiver_var_y'],current_data)
+            Q = plt.quiver(X_center[::pp['quiver_coarsening'],::pp['quiver_coarsening']],
+                             Y_center[::pp['quiver_coarsening'],::pp['quiver_coarsening']],
+                             var_x[::pp['quiver_coarsening'],::pp['quiver_coarsening']],
+                             var_y[::pp['quiver_coarsening'],::pp['quiver_coarsening']],
+                             **pp['kwargs'])
+                             # units=pp['quiver_units'],scale=pp['quiver_scale'])
+
+            # Show key
+            if pp['quiver_key_show']:
+                if pp['quiver_key_scale'] is None:
+                    key_scale = np.max(np.sqrt(var_x**2+var_y**2))*0.5
+                else:
+                    key_scale = pp['quiver_key_scale']
+                label = r"%s %s" % (str(np.ceil(key_scale)),pp['quiver_key_units'])
+                plt.quiverkey(Q,pp['quiver_key_label_x'],pp['quiver_key_label_y'],
+                                key_scale,label,**pp['quiver_key_kwargs'])
+
+    elif pp['plot_type'] == '2d_empty':
+        # no plot to create (user might make one in afteritem or
+        # afteraxes)
+        pass
+
+    else:
+        raise ValueError("Unrecognized plot_type: %s" % pp['plot_type'])
+        return None
+
+    # end of various plot types
+
+
+
+    # plot patch patch edges if desired:
+
+    if pp['patchedges_show']:
+        for i in [0, X_edge.shape[0]-1]:
+            X1 = X_edge[i,:]
+            Y1 = Y_edge[i,:]
+            plt.plot(X1, Y1, pp['patchedges_color'])
+        for i in [0, X_edge.shape[1]-1]:
+            X1 = X_edge[:,i]
+            Y1 = Y_edge[:,i]
+            plt.plot(X1, Y1, pp['patchedges_color'])
+
+
+    if pp['afterpatch']:
+        try:
+            if isinstance(pp['afterpatch'], str):
+                exec(pp['afterpatch'])
+            else:
+                # assume it's a function
+                #current_data.patchno = patch.patch_index # can get from patch
+                current_data.add_attribute('plotitem',plotitem)
+                current_data.patch = patch
+                current_data.var = var
+                current_data.xlower = patch.dimensions[0].lower
+                current_data.xupper = patch.dimensions[0].upper
+                current_data.ylower = patch.dimensions[1].lower
+                current_data.yupper = patch.dimensions[1].upper
+                current_data.x = X_center # cell centers
+                current_data.y = Y_center # cell centers
+                current_data.dx = patch.delta[0]
+                current_data.dy = patch.delta[1]
+
+                output = pp['afterpatch'](current_data)
+                if output: current_data = output
+        except:
+            print '*** Warning: could not execute afterpatch'
+            raise
+
+
+    try:
+        plotitem._current_pobj = pobj
+    except NameError:
+        pass # if no plot was done
+
+
+    return current_data
+
+
+
+
 #--------------------------------------
 def get_var(state, plot_var, current_data):
 #--------------------------------------
@@ -1375,7 +1734,7 @@ def var_minmax(plotdata,framenos,vars):
 
 
 #------------------------------------------------------------------
-def only_most_recent(framenos,outdir='.',verbose=True):
+def only_most_recent(framenos,outdir='.',verbose=True, slice3d=False):
 #------------------------------------------------------------------
 
     """
@@ -1398,16 +1757,23 @@ def only_most_recent(framenos,outdir='.',verbose=True):
             return framenos
 
     fortfile = {}
-    for file in glob.glob('fort.q*'):
-        frameno = int(file[6:])
-        fortfile[frameno] = file
-
-    #DK: In PetClaw, we don't output fort.q* files.  Instead count the
-    #claw.pkl* files.
-    if len(fortfile) == 0:
-        for file in glob.glob('claw.pkl*'):
-            frameno = int(file[8:])
+    
+    if slice3d:
+        #DR: sliced output has different file formats, slice_#.qxxxx
+        for file in glob.glob('slice_*.q*'):
+            frameno = int(file[-4:])    # slice number may have variable digits
             fortfile[frameno] = file
+    else:
+        for file in glob.glob('fort.q*'):
+            frameno = int(file[6:])
+            fortfile[frameno] = file
+
+        #DK: In PetClaw, we don't output fort.q* files.  Instead count the
+        #claw.pkl* files.
+        if len(fortfile) == 0:
+            for file in glob.glob('claw.pkl*'):
+                frameno = int(file[8:])
+                fortfile[frameno] = file
 
     if len(fortfile) == 0:
         print '*** No fort.q or claw.pkl files found in directory ', os.getcwd()

@@ -56,7 +56,6 @@ def plotclaw(outdir='.', plotdir='_plots', setplot = 'setplot.py',
 
     frametools.call_setplot(plotdata.setplot, plotdata)
 
-
     if plotdata.num_procs is None:
         plotdata.num_procs = int(os.environ.get("OMP_NUM_THREADS", 1))
 
