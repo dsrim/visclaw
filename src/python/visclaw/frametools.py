@@ -3,9 +3,11 @@
 Module frametools for plotting frames of time-dependent data.
 """
 
-import os,sys
+import os,sys,gc
 import traceback
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import clawpack.clawutil.data as clawdata
@@ -150,6 +152,7 @@ def plot_frame(framesolns,plotdata,frameno=0,verbose=False):
         # ----------------------------------------
 
         for axesname in plotfigure._axesnames:
+
             plotaxes = plotaxes_dict[axesname]
             if not plotaxes._show:
                 continue   # skip this axes if no items show
@@ -273,9 +276,6 @@ def plot_frame(framesolns,plotdata,frameno=0,verbose=False):
                         else:
                             show_this_level = True
 
-                        import pdb
-                        pdb.set_trace()
-
                         if plotitem._show and show_this_level:
                             if num_dim == 1:
                                 plotitem_fun = plotitem1
@@ -283,6 +283,7 @@ def plot_frame(framesolns,plotdata,frameno=0,verbose=False):
                                 plotitem_fun = plotitem2
                             elif num_dim == 3:
                                 plotitem_fun = plotitem3
+
                             current_data = plotitem_fun(framesoln,plotitem,current_data,stateno)
 
                             if verbose:
@@ -399,6 +400,11 @@ def plot_frame(framesolns,plotdata,frameno=0,verbose=False):
                              format=plotdata.print_format, plotdir=plotdata.plotdir,\
                              verbose=verbose,kml_fig=True,kml_dpi=plotfigure.kml_dpi,
                              kml_figsize=plotfigure.kml_figsize)
+                if plotdata.slice3d:
+                    printfig(frameno=frameno, figno=figno, \
+                             format=plotdata.print_format, plotdir=plotdata.plotdir,\
+                             verbose=verbose,kml_fig=True,kml_dpi=plotfigure.kml_dpi,
+                             kml_figsize=plotfigure.kml_figsize,mlab=framesoln.mlab)
                 else:
                     printfig(frameno=frameno, figno=figno, \
                              format=plotdata.print_format, plotdir=plotdata.plotdir,\
@@ -956,12 +962,13 @@ def plotitem2(framesoln, plotitem, current_data, stateno):
     return current_data
 
 
-
 #==================================================================
 def plotitem3(framesoln, plotitem, current_data, stateno):
 #==================================================================
     """
-    Make a 2d plot for a single plot item for the solution in framesoln.
+    Make a 3d plot for a single plot item for the solution in framesoln.
+
+    Currently supports 3d slice only.
 
     The current_data object holds data that should be passed into
     afterpatch or afteraxes if these functions are defined.  The functions
@@ -975,11 +982,13 @@ def plotitem3(framesoln, plotitem, current_data, stateno):
     from numpy import ma
     from clawpack.visclaw import colormaps
 
+
     plotdata = plotitem._plotdata
 
     state = framesoln.states[stateno]
     patch = state.patch
     level = patch.level #2d only
+    max_level = max([state0.patch.level for state0 in framesoln.states])
 
     current_data.patch = patch
     current_data.q = state.q
@@ -987,6 +996,10 @@ def plotitem3(framesoln, plotitem, current_data, stateno):
     current_data.add_attribute('level',level) #2d only
 
     t = framesoln.t
+    
+    f_handle = plt.gcf()
+    f_handle.clf()
+    plt.hold('on')
 
     # The following plot parameters should be set and independent of
     # which AMR level a patch is on:
@@ -1035,217 +1048,151 @@ def plotitem3(framesoln, plotitem, current_data, stateno):
         X_center, Y_center = xc_centers, yc_centers
         X_edge, Y_edge = xc_edges, yc_edges
 
-    plt.hold(True)
+    if pp['plot_type'] == '3d_slice':
 
-    if ma.isMaskedArray(var):
-        # If var is a masked array: plotting should work ok unless all
-        # values are masked, in which case pcolor complains and there's
-        # no need to try to plot.  Check for this case...
-        var_all_masked = (ma.count(var) == 0)
-    else:
-        # not a masked array, so certainly not all masked:
-        var_all_masked = False
+        from mayavi import mlab
+        from tvtk.api import tvtk
 
-    # pcolormesh is much faster but cannot be used with masked coordinate arrays
-    if ma.isMaskedArray(X_edge) or ma.isMaskedArray(Y_edge):
-        pc_cmd = 'pcolor'
-        pc_mth = plt.pcolor
-    else:
-        pc_cmd = 'pcolormesh'
-        pc_mth = plt.pcolormesh
+        g_handle =  mlab.figure(figure=f_handle, size=(2000,1500))
 
-    if pp['plot_type'] == '2d_pcolor':
+        #TODO set varmin/varmax
 
-        pcolor_cmd = "pobj = plt."+pc_cmd+"(X_edge, Y_edge, var, \
-                        cmap=pp['pcolor_cmap']"
+        minval = pp['pcolor_cmin']
+        maxval = pp['pcolor_cmax']
+
+        translate = 0.0
+
+        print('state number = ' + str(stateno))
+
+        #orient_dict = {'x':[1,2,0],'y':[0,2,1], 'z':[0,1,2]}
+        orient_dict = {'x':[2,0,1],'y':[0,2,1], 'z':[0,1,2]}
+        orient_ord = {'x':0, 'y':1, 'z':2}
+        orient_plane = {'x':'yz', 'y':'xz', 'z':'xy'}
+
+        if state.normal == [1., 0., 0.]:
+            normal = 'x'
+        elif state.normal == [0., 1., 0.]:
+            normal = 'y'
+        elif state.normal == [0., 0., 1.]:
+            normal = 'z'
+        else:
+            print('arbitrary direction')
+
+        translate = state.point[orient_ord[normal]]
+
+        orient_real = orient_dict[normal]
+
+        m1 = patch.dimensions[0].num_cells
+        m2 = patch.dimensions[1].num_cells
+
+        ulo = patch.dimensions[0].lower
+        vlo = patch.dimensions[1].lower
+
+        d1 = patch.dimensions[0].delta
+        d2 = patch.dimensions[0].delta
+
+        # debugging outputs
+        print('\t(plot_slice) patch number ' + str(stateno))
+        print('\t(plot_slice) ' + str(ulo)  + ', ' + str(vlo) + '---' \
+               + str(ulo + d1*m1) + ', ' + str(vlo + d2*m2))
+        print('\t(plot_slice) ' + str(d1) + ' x ' + str(d2))
+
+        # center cells
+        u = np.linspace(ulo,ulo + m1*d1,m1)
+        v = np.linspace(vlo,vlo + m2*d2,m2)
+        scaling = max([u.max() - u.min(), v.max() - v.min()])
+        
+        translate_lo = translate - 5e-5*level/max_level*scaling
+        translate_hi = translate + 5e-5*level/max_level*scaling
+
+        translate_lo2 = translate - 8e-5*level/max_level*scaling
+        translate_hi2 = translate + 8e-5*level/max_level*scaling
+
+
+        tr = np.linspace(translate_lo,translate_hi,2)
+
+
+        grids_list = [u,v,tr]
+        grids = [grids_list[j] for j in orient_real]
+
+        m_list = [m1,m2,1]
+        m_real = [m_list[j] for j in orient_real]
+
+        x,y,z = np.meshgrid(grids[0],grids[1],grids[2],indexing='ij')
+
+        var_no = pp['plot_var']
+
+        q_sol = state.q[var_no,:,:].reshape((m_real[0],m_real[1],m_real[2]),\
+                                            order='F')
+        x.astype(np.float32)
+        y.astype(np.float32)
+        z.astype(np.float32)
+
+        q_sol = q_sol.astype(np.float32)
+        q_sol = q_sol.repeat(2,axis=orient_ord[normal])
+
+        #q_sol = np.sin(x)*np.sin(y)*np.sin(z)
+
+        objname = '_'.join([orient_plane[normal], str(translate), str(stateno)])
+
+
+        src = mlab.pipeline.scalar_field(x,y,z,q_sol,name = objname)
 
         if pp['celledges_show']:
-            pcolor_cmd += ", edgecolors=pp['celledges_color']"
-        else:
-            pcolor_cmd += ", shading='flat'"
 
-        pcolor_cmd += ", **pp['kwargs'])"
+            for tr2val in [translate_lo2, translate_hi2]:
+                tr2 = np.array(tr2val)
+                u1 = np.linspace(ulo,ulo + m1*d1,m1 + 1)
+                v1 = np.linspace(vlo,vlo + m2*d2,m2 + 1)
 
-        if not var_all_masked:
-            exec(pcolor_cmd)
+                grids_list = [u1,v1,tr2]
+                m_list = [m1,m2,1]
+                grids = [grids_list[j] for j in orient_real]
+                m_real = [m_list[j] for j in orient_real]
 
+                x,y,z = np.meshgrid(grids[0],grids[1],grids[2],indexing='ij')
+            
+                x.astype(np.float32)
+                y.astype(np.float32)
+                z.astype(np.float32)
 
-            if (pp['pcolor_cmin'] not in ['auto',None]) and \
-                     (pp['pcolor_cmax'] not in ['auto',None]):
-                plt.clim(pp['pcolor_cmin'], pp['pcolor_cmax'])
-        else:
-            #print '*** Not doing pcolor on totally masked array'
-            pass
+                pts = np.empty(z.shape + (3,), dtype=float)
+                pts[..., 0] = x
+                pts[..., 1] = y
+                pts[..., 2] = z
+                pts = pts.transpose(2, 1, 0, 3).copy()
+                pts.shape = pts.size / 3, 3
+            
+                sg = tvtk.StructuredGrid(dimensions=x.shape, points=pts)
+                d = mlab.pipeline.add_dataset(sg, figure=g_handle)
+                g1 = mlab.pipeline.grid_plane(d, line_width=0.25,color=(0,0,0))
+                g1.grid_plane.axis = normal
 
-    elif pp['plot_type'] == '2d_imshow':
-
-        if not var_all_masked:
-            if pp['imshow_cmin'] in ['auto',None]:
-                pp['imshow_cmin'] = np.min(var)
-            if pp['imshow_cmax'] in ['auto',None]:
-                pp['imshow_cmax'] = np.max(var)
-            from matplotlib.colors import Normalize
-            color_norm = Normalize(pp['imshow_cmin'],pp['imshow_cmax'],clip=True)
-
-            xylimits = (X_edge[0,0],X_edge[-1,-1],Y_edge[0,0],Y_edge[-1,-1])
-            pobj = plt.imshow(np.flipud(var.T), extent=xylimits, \
-                    cmap=pp['imshow_cmap'], interpolation='nearest', \
-                    norm=color_norm)
-
-            if pp['celledges_show']:
-                # This draws patch for labels shown.  Levels not shown will
-                # not have lower levels blanked out however.  There doesn't
-                # seem to be an easy way to do this.
-                pobj = plt.plot(X_edge, Y_edge, color=pp['celledges_color'])
-                pobj = plt.plot(X_edge.T, Y_edge.T, color=pp['celledges_color'])
-
-        else:
-            #print '*** Not doing imshow on totally masked array'
-            pass
+        color_choice = pp['pcolor_cmap']
+        axis_str = normal + '_axes'
+        ax = mlab.colorbar(orientation='vertical')
+        #mlab.title('Solution at t=' + str(t) + '\n q ' + str(var_no+1),\
+                            #size=0.25, figure = g_handle)
 
 
-    elif pp['plot_type'] in ['2d_contour','2d_contourf']:
-        levels_set = True
-        if pp['contour_levels'] is None:
-            levels_set = False
-            if pp['contour_nlevels'] is None:
-                print '*** Error in plotitem2:'
-                print '    contour_levels or contour_nlevels must be set'
-                raise
-                return
-            if (pp['contour_min'] is not None) and \
-                    (pp['contour_max'] is not None):
-
-                pp['contour_levels'] = np.linspace(pp['contour_min'], \
-                       pp['contour_max'], pp['contour_nlevels'])
-                levels_set = True
-
-
-        if pp['celledges_show']:
-            pobj = pc_mth(X_edge, Y_edge, np.zeros(var.shape), \
-                    cmap=pp['patch_bgcolormap'], edgecolors=pp['celledges_color'])
-        elif pp['patch_bgcolor'] is not 'w':
-            pobj = pc_mth(X_edge, Y_edge, np.zeros(var.shape), \
-                    cmap=pp['patch_bgcolormap'], edgecolors='None')
-        plt.hold(True)
-
-
-        if pp['plot_type'] == '2d_contour':
-            # create the contour command:
-            contourcmd = "pobj = plt.contour(X_center, Y_center, var, "
-            if levels_set:
-                contourcmd += "pp['contour_levels']"
-            else:
-                contourcmd += "pp['contour_nlevels']"
-
-            if pp['contour_cmap']:
-                if (pp['kwargs'] is None) or ('cmap' not in pp['kwargs']):
-                    contourcmd += ", cmap = pp['contour_cmap']"
-            elif pp['contour_colors']:
-                if (pp['kwargs'] is None) or ('colors' not in pp['kwargs']):
-                    contourcmd += ", colors = pp['contour_colors']"
-
-            contourcmd += ", **pp['kwargs'])"
-
-            if (pp['contour_show'] and not var_all_masked):
-                # may suppress plotting at coarse levels
-                exec(contourcmd)
-
-
-        if pp['plot_type'] == '2d_contourf':
-
-            # create the contourf command:
-            contourcmd = "pobj = plt.contourf(X_center, Y_center, var, "
-            if levels_set:
-                contourcmd += "pp['contour_levels']"
-            else:
-                contourcmd += "pp['contour_nlevels']"
-
-            if pp['fill_cmap']:
-                if (pp['kwargs'] is None) or ('cmap' not in pp['kwargs']):
-                    contourcmd += ", cmap = pp['fill_cmap']"
-            elif pp['fill_colors']:
-                if (pp['kwargs'] is None) or ('colors' not in pp['kwargs']):
-                    contourcmd += ", colors = pp['fill_colors']"
-
-
-            if (pp['kwargs'] is None) or ('extend' not in pp['kwargs']):
-                contourcmd += ", extend = 'both'"
-
-            contourcmd += ", **pp['kwargs'])"
-
-
-            if (not var_all_masked):
-                # may suppress plotting at coarse levels
-                exec(contourcmd)
-
-                if pp['fill_cmap'] and \
-                         (pp['fill_cmin'] not in ['auto',None]) and \
-                         (pp['fill_cmax'] not in ['auto',None]):
-                    plt.clim(pp['fill_cmin'], pp['fill_cmax'])
-
-
-    elif pp['plot_type'] == '2d_patch':
-        # plot only the patches, no data:
-        if pp['celledges_show']:
-            pobj = pc_mth(X_edge, Y_edge, np.zeros(var.shape), \
-                    cmap=pp['patch_bgcolormap'], edgecolors=pp['celledges_color'],\
-                    shading='faceted')
-        else:
-            pobj = pc_mth(X_edge, Y_edge, np.zeros(var.shape), \
-                    cmap=pp['patch_bgcolormap'], shading='flat')
-
-
-    elif pp['plot_type'] == '2d_schlieren':
-        # plot 2-norm of gradient of variable var:
-
-        # No idea why this next line is needed...maybe a 64-/32-bit incompatibility issue?
-        var = np.array(var)
-        (vx,vy) = np.gradient(var)
-        vs = np.sqrt(vx**2 + vy**2)
-
-        pcolor_cmd = "pobj = plt.pcolormesh(X_edge, Y_edge, vs, \
-                        cmap=pp['schlieren_cmap']"
-
-        if pp['celledges_show']:
-            pcolor_cmd += ", edgecolors=pp['celledges_color']"
-        else:
-            pcolor_cmd += ", edgecolors='None'"
-
-        pcolor_cmd += ", **pp['kwargs'])"
-
-        if not var_all_masked:
-            exec(pcolor_cmd)
-
-            if (pp['schlieren_cmin'] not in ['auto',None]) and \
-                     (pp['schlieren_cmax'] not in ['auto',None]):
-                plt.clim(pp['schlieren_cmin'], pp['schlieren_cmax'])
-
-    elif pp['plot_type'] == '2d_quiver':
-        if pp['quiver_coarsening'] > 0:
-            var_x = get_var(state,pp['quiver_var_x'],current_data)
-            var_y = get_var(state,pp['quiver_var_y'],current_data)
-            Q = plt.quiver(X_center[::pp['quiver_coarsening'],::pp['quiver_coarsening']],
-                             Y_center[::pp['quiver_coarsening'],::pp['quiver_coarsening']],
-                             var_x[::pp['quiver_coarsening'],::pp['quiver_coarsening']],
-                             var_y[::pp['quiver_coarsening'],::pp['quiver_coarsening']],
-                             **pp['kwargs'])
-                             # units=pp['quiver_units'],scale=pp['quiver_scale'])
-
-            # Show key
-            if pp['quiver_key_show']:
-                if pp['quiver_key_scale'] is None:
-                    key_scale = np.max(np.sqrt(var_x**2+var_y**2))*0.5
-                else:
-                    key_scale = pp['quiver_key_scale']
-                label = r"%s %s" % (str(np.ceil(key_scale)),pp['quiver_key_units'])
-                plt.quiverkey(Q,pp['quiver_key_label_x'],pp['quiver_key_label_y'],
-                                key_scale,label,**pp['quiver_key_kwargs'])
-
-    elif pp['plot_type'] == '2d_empty':
-        # no plot to create (user might make one in afteritem or
-        # afteraxes)
-        pass
+        # plot two slices according to adaptive mesh level
+        # patch one
+        yp = mlab.pipeline.scalar_cut_plane(src, plane_orientation=axis_str,opacity=1.0,figure=g_handle,vmin=minval,vmax=maxval,colormap=color_choice)
+        tr_vec = np.zeros(3)
+        tr_vec[orient_ord[normal]] = translate - 5e-5*level/max_level*scaling
+        yp.implicit_plane.origin = (tr_vec[0],tr_vec[1],tr_vec[2])
+        yp.implicit_plane.visible = False
+    
+        
+        # patch two
+        yp = mlab.pipeline.scalar_cut_plane(src, plane_orientation=axis_str,opacity=1.0,figure=g_handle,vmin=minval,vmax=maxval,colormap=color_choice)
+        tr_vec[orient_ord[normal]] = translate + 5e-5*level/max_level*scaling
+        yp.implicit_plane.origin = (tr_vec[0],tr_vec[1],tr_vec[2])
+        yp.implicit_plane.visible = False
+        
+        g_handle.scene._update_view(1, 1, 1, 0, 0, 0)
+        framesoln.mlab = mlab
+        mlab.outline(line_width=0.2)
 
     else:
         raise ValueError("Unrecognized plot_type: %s" % pp['plot_type'])
@@ -1327,7 +1274,8 @@ def get_var(state, plot_var, current_data):
 
 #------------------------------------------------------------------------
 def printfig(fname='',frameno='', figno='', format='png', plotdir='.', \
-             verbose=True, kml_fig=False, kml_dpi=None, kml_figsize=None):
+             verbose=True, kml_fig=False, kml_dpi=None, kml_figsize=None,\
+             mlab=None):
 #------------------------------------------------------------------------
     """
     Save the current plot to file fname or standard name from frame/fig.
@@ -1372,6 +1320,10 @@ def printfig(fname='',frameno='', figno='', format='png', plotdir='.', \
             fig.set_size_inches(kml_figsize[0],kml_figsize[1])
         plt.savefig(fname, transparent=True, bbox_inches='tight', \
                       pad_inches=0,dpi=kml_dpi)
+    if not mlab==None:
+        mlab.savefig(fname)
+        mlab.clf()
+        gc.collect()
     else:
         plt.savefig(fname)
 
@@ -1790,7 +1742,7 @@ def only_most_recent(framenos,outdir='.',verbose=True, slice3d=False):
         mtime = os.path.getmtime(fortfile[frameno])
         # sometimes later fort files are closed a few seconds after
         # earlier ones, so include a possible delaytime:
-        delaytime = 5  # seconds
+        delaytime = 1000  # seconds
         if mtime < mtimeprev-delaytime:
             break
         numframes = numframes + 1
