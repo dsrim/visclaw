@@ -1009,7 +1009,8 @@ def plotitem3(framesoln, plotitem, current_data, stateno):
     level_params = ['plot_var','afterpatch','kwargs',
              'celledges_show','celledges_color','patch_bgcolor',
              'patchedges_show','patchedges_color','add_colorbar',
-             'pcolor_cmap','pcolor_cmin','pcolor_cmax',
+             'pcolor_cmap','pcolor_cmin','pcolor_cmax','amr_max_level',
+             'update_view',
              'imshow_cmap','imshow_cmin','imshow_cmax',
              'contour_levels','contour_nlevels','contour_min','contour_max',
              'contour_colors','contour_cmap','contour_show',
@@ -1050,150 +1051,202 @@ def plotitem3(framesoln, plotitem, current_data, stateno):
 
     if pp['plot_type'] == '3d_slice':
 
-        from mayavi import mlab
-        from tvtk.api import tvtk
+        # sloppy
+        amr_max_level = pp['amr_max_level']
 
-        g_handle =  mlab.figure(figure=f_handle, size=(2000,1500))
+        if level <= amr_max_level:
+            from mayavi import mlab
+            from tvtk.api import tvtk
 
-        #TODO set varmin/varmax
+            g_handle =  mlab.figure(figure=f_handle, size=(2000,1500))
 
-        minval = pp['pcolor_cmin']
-        maxval = pp['pcolor_cmax']
+            #TODO set varmin/varmax
 
-        translate = 0.0
+            minval = pp['pcolor_cmin']
+            maxval = pp['pcolor_cmax']
 
-        print('state number = ' + str(stateno))
+            translate = 0.0
 
-        #orient_dict = {'x':[1,2,0],'y':[0,2,1], 'z':[0,1,2]}
-        orient_dict = {'x':[2,0,1],'y':[0,2,1], 'z':[0,1,2]}
-        orient_ord = {'x':0, 'y':1, 'z':2}
-        orient_plane = {'x':'yz', 'y':'xz', 'z':'xy'}
+            print('state number = ' + str(stateno))
 
-        if state.normal == [1., 0., 0.]:
-            normal = 'x'
-        elif state.normal == [0., 1., 0.]:
-            normal = 'y'
-        elif state.normal == [0., 0., 1.]:
-            normal = 'z'
-        else:
-            print('arbitrary direction')
+            #orient_dict = {'x':[1,2,0],'y':[0,2,1], 'z':[0,1,2]}
+            orient_dict = {'x':[2,0,1],'y':[0,2,1], 'z':[0,1,2]}
+            orient_ord = {'x':0, 'y':1, 'z':2}
+            orient_plane = {'x':'yz', 'y':'xz', 'z':'xy'}
 
-        translate = state.point[orient_ord[normal]]
+            if state.normal == [1., 0., 0.]:
+                normal = 'x'
+            elif state.normal == [0., 1., 0.]:
+                normal = 'y'
+            elif state.normal == [0., 0., 1.]:
+                normal = 'z'
+            else:
+                print('arbitrary direction')
 
-        orient_real = orient_dict[normal]
+            translate = state.point[orient_ord[normal]]
 
-        m1 = patch.dimensions[0].num_cells
-        m2 = patch.dimensions[1].num_cells
+            orient_real = orient_dict[normal]
 
-        ulo = patch.dimensions[0].lower
-        vlo = patch.dimensions[1].lower
+            m1 = patch.dimensions[0].num_cells
+            m2 = patch.dimensions[1].num_cells
 
-        d1 = patch.dimensions[0].delta
-        d2 = patch.dimensions[0].delta
+            ulo = patch.dimensions[0].lower
+            vlo = patch.dimensions[1].lower
 
-        # debugging outputs
-        print('\t(plot_slice) patch number ' + str(stateno))
-        print('\t(plot_slice) ' + str(ulo)  + ', ' + str(vlo) + '---' \
-               + str(ulo + d1*m1) + ', ' + str(vlo + d2*m2))
-        print('\t(plot_slice) ' + str(d1) + ' x ' + str(d2))
+            d1 = patch.dimensions[0].delta
+            d2 = patch.dimensions[1].delta
 
-        # center cells
-        u = np.linspace(ulo,ulo + m1*d1,m1)
-        v = np.linspace(vlo,vlo + m2*d2,m2)
-        scaling = max([u.max() - u.min(), v.max() - v.min()])
-        
-        translate_lo = translate - 5e-5*level/max_level*scaling
-        translate_hi = translate + 5e-5*level/max_level*scaling
+            uhi = ulo + m1*d1
+            vhi = vlo + m2*d2
 
-        translate_lo2 = translate - 8e-5*level/max_level*scaling
-        translate_hi2 = translate + 8e-5*level/max_level*scaling
+            # debugging outputs
+            print('\t(plot_slice) patch number ' + str(stateno))
+            print('\t(plot_slice) ' + str(ulo)  + ', ' + str(vlo) + ' - ' \
+                   + str(uhi) + ', ' + str(vhi))
+            print('\t(plot_slice) ' + str(d1) + ' x ' + str(d2))
 
-
-        tr = np.linspace(translate_lo,translate_hi,2)
-
-
-        grids_list = [u,v,tr]
-        grids = [grids_list[j] for j in orient_real]
-
-        m_list = [m1,m2,1]
-        m_real = [m_list[j] for j in orient_real]
-
-        x,y,z = np.meshgrid(grids[0],grids[1],grids[2],indexing='ij')
-
-        var_no = pp['plot_var']
-
-        q_sol = state.q[var_no,:,:].reshape((m_real[0],m_real[1],m_real[2]),\
-                                            order='F')
-        x.astype(np.float32)
-        y.astype(np.float32)
-        z.astype(np.float32)
-
-        q_sol = q_sol.astype(np.float32)
-        q_sol = q_sol.repeat(2,axis=orient_ord[normal])
-
-        #q_sol = np.sin(x)*np.sin(y)*np.sin(z)
-
-        objname = '_'.join([orient_plane[normal], str(translate), str(stateno)])
-
-
-        src = mlab.pipeline.scalar_field(x,y,z,q_sol,name = objname)
-
-        if pp['celledges_show']:
-
-            for tr2val in [translate_lo2, translate_hi2]:
-                tr2 = np.array(tr2val)
-                u1 = np.linspace(ulo,ulo + m1*d1,m1 + 1)
-                v1 = np.linspace(vlo,vlo + m2*d2,m2 + 1)
-
-                grids_list = [u1,v1,tr2]
-                m_list = [m1,m2,1]
-                grids = [grids_list[j] for j in orient_real]
-                m_real = [m_list[j] for j in orient_real]
-
-                x,y,z = np.meshgrid(grids[0],grids[1],grids[2],indexing='ij')
+            # center cells
+            u = np.linspace(ulo,uhi,m1)
+            v = np.linspace(vlo,vhi,m2)
+            scaling = max([u.max() - u.min(), v.max() - v.min()])
             
-                x.astype(np.float32)
-                y.astype(np.float32)
-                z.astype(np.float32)
+            #translate_lo = translate - 5e-5*level/max_level*scaling
+            #translate_hi = translate + 5e-5*level/max_level*scaling
 
-                pts = np.empty(z.shape + (3,), dtype=float)
-                pts[..., 0] = x
-                pts[..., 1] = y
-                pts[..., 2] = z
-                pts = pts.transpose(2, 1, 0, 3).copy()
-                pts.shape = pts.size / 3, 3
-            
-                sg = tvtk.StructuredGrid(dimensions=x.shape, points=pts)
-                d = mlab.pipeline.add_dataset(sg, figure=g_handle)
-                g1 = mlab.pipeline.grid_plane(d, line_width=0.25,color=(0,0,0))
-                g1.grid_plane.axis = normal
+            #translate_lo2 = translate - 8e-5*level/max_level*scaling
+            #translate_hi2 = translate + 8e-5*level/max_level*scaling
 
-        color_choice = pp['pcolor_cmap']
-        axis_str = normal + '_axes'
-        ax = mlab.colorbar(orientation='vertical')
-        #mlab.title('Solution at t=' + str(t) + '\n q ' + str(var_no+1),\
-                            #size=0.25, figure = g_handle)
+            translate_lo = translate - 5e-4*level/max_level*scaling
+            translate_hi = translate + 5e-4*level/max_level*scaling
+
+            translate_lo2 = translate - 5e-4*level/max_level*scaling - 1e-6
+            translate_hi2 = translate + 5e-4*level/max_level*scaling + 1e-6
+
+            tr = np.linspace(translate_lo,translate_hi,2)
 
 
-        # plot two slices according to adaptive mesh level
-        # patch one
-        yp = mlab.pipeline.scalar_cut_plane(src, plane_orientation=axis_str,opacity=1.0,figure=g_handle,vmin=minval,vmax=maxval,colormap=color_choice)
-        tr_vec = np.zeros(3)
-        tr_vec[orient_ord[normal]] = translate - 5e-5*level/max_level*scaling
-        yp.implicit_plane.origin = (tr_vec[0],tr_vec[1],tr_vec[2])
-        yp.implicit_plane.visible = False
+            grids_list = [u,v,tr]
+            grids = [grids_list[j] for j in orient_real]
+
+            m_list = [m1,m2,1]
+            m_real = [m_list[j] for j in orient_real]
+
+            x,y,z = np.meshgrid(grids[0],grids[1],grids[2],indexing='ij')
+
+            var_no = pp['plot_var']
+
+            q_sol = state.q[var_no,:,:].reshape((m_real[0],m_real[1],m_real[2]),\
+                                                order='F')
+            x.astype(np.float32)
+            y.astype(np.float32)
+            z.astype(np.float32)
+
+            q_sol = q_sol.astype(np.float32)
+            q_sol = q_sol.repeat(2,axis=orient_ord[normal])
+
+            #q_sol = np.sin(x)*np.sin(y)*np.sin(z)
+
+            objname = '_'.join([orient_plane[normal], str(translate), str(stateno)])
+
+
+            src = mlab.pipeline.scalar_field(x,y,z,q_sol,name = objname)
+
+            if pp['celledges_show']:
+
+                for tr2val in [translate_lo2, translate_hi2]:
+                    tr2 = np.array(tr2val)
+                    u1 = np.linspace(ulo,uhi,m1+1)
+                    v1 = np.linspace(vlo,vhi,m2+1)
+
+                    grids_list = [u1,v1,tr2]
+                    m_list = [m1,m2,1]
+                    grids = [grids_list[j] for j in orient_real]
+                    m_real = [m_list[j] for j in orient_real]
+
+                    x,y,z = np.meshgrid(grids[0],grids[1],grids[2],indexing='ij')
+                
+                    x.astype(np.float32)
+                    y.astype(np.float32)
+                    z.astype(np.float32)
+
+                    pts = np.empty(z.shape + (3,), dtype=float)
+                    pts[..., 0] = x
+                    pts[..., 1] = y
+                    pts[..., 2] = z
+                    pts = pts.transpose(2, 1, 0, 3).copy()
+                    pts.shape = pts.size / 3, 3
+                
+                    sg = tvtk.StructuredGrid(dimensions=x.shape, points=pts)
+                    d = mlab.pipeline.add_dataset(sg, figure=g_handle)
+                    g1 = mlab.pipeline.grid_plane(d, line_width=0.25,color=(0,0,0))
+                    g1.grid_plane.axis = normal
+
+            color_choice = pp['pcolor_cmap']
+
+            axis_str = normal + '_axes'
+            ax = mlab.colorbar(orientation='vertical')
+            #mlab.title('Solution at t=' + str(t) + '\n q ' + str(var_no+1),\
+            #                    size=0.25, figure = g_handle)
+
+
+            # plot two slices according to adaptive mesh level
+            # patch one
+            yp = mlab.pipeline.scalar_cut_plane(src, plane_orientation=axis_str,opacity=1.0,figure=g_handle,vmin=minval,vmax=maxval,colormap=color_choice)
+            tr_vec = np.zeros(3)
+            tr_vec[orient_ord[normal]] = translate - 4.5e-4*level/max_level*scaling
+            yp.implicit_plane.origin = (tr_vec[0],tr_vec[1],tr_vec[2])
+            yp.implicit_plane.visible = False
     
-        
-        # patch two
-        yp = mlab.pipeline.scalar_cut_plane(src, plane_orientation=axis_str,opacity=1.0,figure=g_handle,vmin=minval,vmax=maxval,colormap=color_choice)
-        tr_vec[orient_ord[normal]] = translate + 5e-5*level/max_level*scaling
-        yp.implicit_plane.origin = (tr_vec[0],tr_vec[1],tr_vec[2])
-        yp.implicit_plane.visible = False
-        
-        g_handle.scene._update_view(1, 1, 1, 0, 0, 0)
-        framesoln.mlab = mlab
-        mlab.outline(line_width=0.2)
+            if level == 1:
+                if normal == 'x':
+                    ax0 = mlab.axes(y_axis_visibility=False,ylabel='',\
+                                    z_axis_visibility=False,zlabel='')
+                    ax0.axes.font_factor = 0.25
+                if normal == 'y':
+                    ax0 = mlab.axes(x_axis_visibility=False,xlabel='',\
+                                    z_axis_visibility=False,zlabel='')
+                    ax0.axes.font_factor = 0.25
+                if normal == 'z':
+                    ax0 = mlab.axes(x_axis_visibility=False,xlabel='',\
+                                    y_axis_visibility=False,ylabel='')
+                    ax0.axes.font_factor = 0.25
+            
+            # patch two
+            yp = mlab.pipeline.scalar_cut_plane(src, plane_orientation=axis_str,opacity=1.0,figure=g_handle,vmin=minval,vmax=maxval,colormap=color_choice)
+            tr_vec[orient_ord[normal]] = translate + 4.5e-4*level/max_level*scaling
+            yp.implicit_plane.origin = (tr_vec[0],tr_vec[1],tr_vec[2])
+            yp.implicit_plane.visible = False
+            
+            framesoln.mlab = mlab
+            mlab.outline(line_width=0.2)
 
+            # set view
+            update_view = pp['update_view']
+            g_handle.scene._update_view(update_view[0], \
+                                        update_view[1], \
+                                        update_view[2], \
+                                        update_view[3], \
+                                        update_view[4], \
+                                        update_view[5])
+            mlab.orientation_axes()
+
+            if level == 1:
+                if normal == 'x':
+                    ax0 = mlab.axes(y_axis_visibility=True,ylabel='',\
+                                    z_axis_visibility=True,zlabel='')
+                    ax0.axes.font_factor = 0.5
+
+                if normal == 'y':
+                    ax0 = mlab.axes(x_axis_visibility=True,xlabel='',\
+                                    z_axis_visibility=True,zlabel='')
+                    ax0.axes.font_factor = 0.5
+
+                if normal == 'z':
+                    ax0 = mlab.axes(x_axis_visibility=True,xlabel='',\
+                                    y_axis_visibility=True,ylabel='')
+                    ax0.axes.font_factor = 0.5
+
+            mlab.draw()
     else:
         raise ValueError("Unrecognized plot_type: %s" % pp['plot_type'])
         return None

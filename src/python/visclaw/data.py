@@ -213,6 +213,7 @@ class ClawPlotData(clawdata.ClawData):
         """
 
         from clawpack.pyclaw import solution
+        import copy
 
         framesoln_dict = self.framesoln_dict
 
@@ -253,9 +254,10 @@ class ClawPlotData(clawdata.ClawData):
                         state.normal = self.normal[j]
                         state.point = self.point[j]
 
-                    all_states = all_states + framesoln1.states
+                    all_states += framesoln1.states
 
                 framesoln = framesoln1
+                framesoln.states = all_states
 
             else:
                 framesoln = solution.Solution(frameno,path=outdir,file_format=self.format)
@@ -901,10 +903,14 @@ class ClawPlotItem(clawdata.ClawData):
                 self.add_attribute('amr_%s' % a, [])
 
             if plot_type == '3d_slice':
+
                 from clawpack.visclaw import colormaps
                 self.add_attribute('pcolor_cmap',colormaps.yellow_red_blue)
+
                 self.add_attribute('pcolor_cmin',None)
                 self.add_attribute('pcolor_cmax',None)
+                self.add_attribute('amr_max_level',50)
+                self.add_attribute('update_view',[1,1,1,0,0,0])
 
             else:
                  print '*** Warning 3d plot type %s not recognized' % plot_type
